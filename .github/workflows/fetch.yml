@@ -1,34 +1,22 @@
-name: Fetch Myfxbook Sentiment
-
-on:
-  schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  fetch:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login and fetch sentiment data
+- name: Login and fetch sentiment data
         env:
           MYFXBOOK_EMAIL: ${{ secrets.MYFXBOOK_EMAIL }}
           MYFXBOOK_PASSWORD: ${{ secrets.MYFXBOOK_PASSWORD }}
         run: |
+          set +e
           LOGIN_RESPONSE=$(curl -s "https://www.myfxbook.com/api/login.json?email=${MYFXBOOK_EMAIL}&password=${MYFXBOOK_PASSWORD}")
-          SESSION=$(echo "$LOGIN_RESPONSE" | grep -oP '"session":"\K[^"]+')
-          sleep 5
-          curl -s "https://www.myfxbook.com/api/get-community-outlook.json?session=${SESSION}" -o sentiment.json
-          cat sentiment.json
+          echo "Login response length: ${#LOGIN_RESPONSE}"
+          echo "Login response (masked check): $LOGIN_RESPONSE" | sed 's/session":"[^"]*"/session":"HIDDEN"/'
 
-      - name: Commit and push if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add sentiment.json
-          git diff --staged --quiet || git commit -m "Update sentiment data"
-          git push
+          SESSION=$(echo "$LOGIN_RESPONSE" | grep -oP '"session":"\K[^"]+')
+          echo "Session extracted length: ${#SESSION}"
+
+          sleep 5
+
+          curl -s "https://www.myfxbook.com/api/get-community-outlook.json?session=${SESSION}" -o sentiment.json
+          echo "Outlook fetch exit code: $?"
+          echo "sentiment.json size:"
+          wc -c sentiment.json
+          echo "First 200 chars of sentiment.json:"
+          head -c 200 sentiment.json
+          echo ""

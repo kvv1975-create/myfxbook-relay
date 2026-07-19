@@ -1,7 +1,7 @@
 - name: Login and fetch sentiment data
         env:
-          MYFXBOOK_EMAIL: ${{ secrets.MYFXBOOK_EMAIL }}
-          MYFXBOOK_PASSWORD: ${{ secrets.MYFXBOOK_PASSWORD }}
+          MYFXBOOK_EMAIL: ${{ secrets.kvv1975@gmail.com }}
+          MYFXBOOK_PASSWORD: ${{ secrets.Iamsai1975@ }}
         run: |
           set +e
           LOGIN_RESPONSE=$(curl -s "https://www.myfxbook.com/api/login.json?email=${MYFXBOOK_EMAIL}&password=${MYFXBOOK_PASSWORD}")

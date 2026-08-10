@@ -33,36 +33,44 @@ jobs:
               errors="ignore"
           )
 
-          # Get visible text from the HTML
+          # Convert HTML to text
           text = re.sub(r"<[^>]+>", "\n", html)
           text = text.replace("&nbsp;", " ")
+          text = text.replace("\r", "")
 
-          # Locate the C Drive Reading section
-          start = text.find("C Drive Reading")
-          end = text.find("Adobe Acrobat")
+          # Find the exact data boundaries
+          start_marker = "Data Start"
+          end_marker = "Data End"
+
+          start = text.find(start_marker)
 
           if start == -1:
-              raise SystemExit("C Drive Reading section not found")
+              raise SystemExit("Data Start marker not found")
+
+          start = start + len(start_marker)
+
+          end = text.find(end_marker, start)
 
           if end == -1:
-              end = len(text)
+              raise SystemExit("Data End marker not found")
 
+          # Copy ONLY the content between the two markers
           data = text[start:end].strip()
 
-          # Preserve the data inside our HTML page
+          # Create the GitHub HTML page
           output = """<!DOCTYPE html>
-          <html>
-          <head>
-          <meta charset="UTF-8">
-          <title>The Forex Fund Manager</title>
-          </head>
-          <body>
-          <pre>
-          """ + data + """
-          </pre>
-          </body>
-          </html>
-          """
+<html>
+<head>
+<meta charset="UTF-8">
+<title>The Forex Fund Manager</title>
+</head>
+<body>
+<pre>
+""" + data + """
+</pre>
+</body>
+</html>
+"""
 
           Path("theforexfundmanager.html").write_text(
               output,
@@ -77,7 +85,9 @@ jobs:
 
           git add theforexfundmanager.html
 
-          git diff --cached --quiet || \
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+          else
             git commit -m "Update ForexFundManager data"
-
-          git push
+            git push
+          fi

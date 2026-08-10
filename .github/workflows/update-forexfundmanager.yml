@@ -1,270 +1,181 @@
-name: Update ForexFundManager
+  - name: Check source data
+    run: |
+      python3 <<'PY'
+      from pathlib import Path
+      import re
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "*/30 * * * *"
+      html = Path("source.html").read_text(
+          encoding="utf-8",
+          errors="ignore"
+      )
 
-permissions:
-  contents: write
+      print("Total characters received:", len(html))
 
-jobs:
-  update:
-    runs-on: ubuntu-latest
+      # Find ONLY standalone marker lines.
+      start_match = re.search(
+          r'(?im)^[ \t]*Data Start[ \t]*$',
+          html
+      )
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      end_match = re.search(
+          r'(?im)^[ \t]*Data End[ \t]*$',
+          html
+      )
 
-      - name: Download test.html
-        run: |
-          echo "Downloading source page..."
+      print("Standalone Data Start found:", bool(start_match))
+      print("Standalone Data End found:", bool(end_match))
 
-          curl -L \
-            --fail \
-            --silent \
-            --show-error \
-            --user-agent "Mozilla/5.0" \
-            "http://www.theforexfundmanager.com/test.html" \
-            -o source.html
-
-          echo "Downloaded successfully."
-
-          echo "File size:"
-          wc -c source.html
-
-      - name: Check source data
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          html = Path("source.html").read_text(
-              encoding="utf-8",
-              errors="ignore"
+      if not start_match:
+          raise SystemExit(
+              "ERROR: Standalone Data Start marker was NOT found. "
+              "Existing output will NOT be changed."
           )
 
-          print("Total characters received:", len(html))
-
-          start_positions = []
-          pos = 0
-
-          while True:
-              pos = html.find("Data Start", pos)
-
-              if pos == -1:
-                  break
-
-              start_positions.append(pos)
-              pos += len("Data Start")
-
-          end_positions = []
-          pos = 0
-
-          while True:
-              pos = html.find("Data End", pos)
-
-              if pos == -1:
-                  break
-
-              end_positions.append(pos)
-              pos += len("Data End")
-
-          print("Data Start occurrences:", len(start_positions))
-          print("Data End occurrences:", len(end_positions))
-
-          if not start_positions:
-              raise SystemExit(
-                  "ERROR: Data Start was NOT found. "
-                  "Existing output will NOT be changed."
-              )
-
-          if not end_positions:
-              raise SystemExit(
-                  "ERROR: Data End was NOT found. "
-                  "Existing output will NOT be changed."
-              )
-
-          found = False
-
-          for start in start_positions:
-              for end in end_positions:
-
-                  if end <= start:
-                      continue
-
-                  data = html[
-                      start + len("Data Start"):end
-                  ].strip()
-
-                  if ";" in data:
-                      print("Valid data block found.")
-                      print("Extracted data characters:", len(data))
-                      print("First 500 characters:")
-                      print(data[:500])
-
-                      found = True
-                      break
-
-              if found:
-                  break
-
-          if not found:
-              raise SystemExit(
-                  "ERROR: No Data Start/Data End block containing "
-                  "semicolon-separated records was found. "
-                  "Existing output will NOT be changed."
-              )
-
-          print("Source data validation successful.")
-
-          PY
-
-      - name: Extract data and create HTML
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-          import html as html_module
-
-          source = Path("source.html").read_text(
-              encoding="utf-8",
-              errors="ignore"
+      if not end_match:
+          raise SystemExit(
+              "ERROR: Standalone Data End marker was NOT found. "
+              "Existing output will NOT be changed."
           )
 
-          start_positions = []
-          pos = 0
-
-          while True:
-              pos = source.find("Data Start", pos)
-
-              if pos == -1:
-                  break
-
-              start_positions.append(pos)
-              pos += len("Data Start")
-
-          end_positions = []
-          pos = 0
-
-          while True:
-              pos = source.find("Data End", pos)
-
-              if pos == -1:
-                  break
-
-              end_positions.append(pos)
-              pos += len("Data End")
-
-          data = None
-
-          for start in start_positions:
-              for end in end_positions:
-
-                  if end <= start:
-                      continue
-
-                  candidate = source[
-                      start + len("Data Start"):end
-                  ].strip()
-
-                  if ";" in candidate:
-                      data = candidate
-                      break
-
-              if data is not None:
-                  break
-
-          if data is None:
-              raise SystemExit(
-                  "ERROR: Valid Data Start/Data End block not found."
-              )
-
-          # Convert HTML tags into line breaks.
-          data = re.sub(r"<[^>]+>", "\n", data)
-
-          # Decode HTML entities such as &nbsp;.
-          data = html_module.unescape(data)
-
-          # Remove invisible characters.
-          data = data.replace("\u200b", "")
-          data = data.replace("\ufeff", "")
-          data = data.replace("\u00a0", " ")
-
-          data = data.strip()
-
-          # Final safety check.
-          if ";" not in data:
-              raise SystemExit(
-                  "SAFETY ERROR: Extracted data contains no "
-                  "semicolon-separated records."
-              )
-
-          print("Valid licence data extracted.")
-          print("Data characters:", len(data))
-          print("First 1000 characters:")
-          print(data[:1000])
-
-          output = (
-              "<!DOCTYPE html>\n"
-              "<html>\n"
-              "<head>\n"
-              "<meta charset=\"UTF-8\">\n"
-              "<title>The Forex Fund Manager</title>\n"
-              "</head>\n"
-              "<body>\n"
-              "<pre>\n"
-              + data +
-              "\n</pre>\n"
-              "</body>\n"
-              "</html>\n"
+      if end_match.start() <= start_match.end():
+          raise SystemExit(
+              "ERROR: Data End occurs before Data Start. "
+              "Existing output will NOT be changed."
           )
 
-          Path("theforexfundmanager.html").write_text(
-              output,
-              encoding="utf-8"
+      data = html[start_match.end():end_match.start()].strip()
+
+      print("Correct Data Start position:", start_match.start())
+      print("Correct Data End position:", end_match.start())
+      print("Extracted data characters:", len(data))
+
+      print("First 1000 characters of extracted data:")
+      print(data[:1000])
+
+      # Safety check:
+      # allow text such as Hello, but require at least one licence record.
+      records = [
+          line.strip()
+          for line in data.splitlines()
+          if ";" in line
+      ]
+
+      if not records:
+          raise SystemExit(
+              "ERROR: No semicolon-separated licence records found. "
+              "Existing output will NOT be changed."
           )
 
-          print("Output file created successfully.")
+      print("Licence records detected:", len(records))
+      print("Source data check PASSED.")
 
-          PY
+      PY
 
-      - name: Commit changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+  - name: Extract data and create HTML
+    run: |
+      python3 <<'PY'
+      from pathlib import Path
+      import re
+      import html as html_module
 
-          git add theforexfundmanager.html
+      source = Path("source.html").read_text(
+          encoding="utf-8",
+          errors="ignore"
+      )
 
-          if git diff --cached --quiet; then
-            echo "No changes detected."
-            exit 0
-          fi
+      # Find ONLY standalone marker lines.
+      start_match = re.search(
+          r'(?im)^[ \t]*Data Start[ \t]*$',
+          source
+      )
 
-          git commit -m "Update ForexFundManager data"
+      end_match = re.search(
+          r'(?im)^[ \t]*Data End[ \t]*$',
+          source
+      )
 
-          echo "Getting latest GitHub changes..."
-          git fetch origin main
+      if not start_match:
+          raise SystemExit(
+              "ERROR: Standalone Data Start marker not found."
+          )
 
-          echo "Rebasing on latest main..."
-          git rebase -X theirs origin/main
+      if not end_match:
+          raise SystemExit(
+              "ERROR: Standalone Data End marker not found."
+          )
 
-          echo "Pushing updated data..."
+      if end_match.start() <= start_match.end():
+          raise SystemExit(
+              "ERROR: Data End occurs before Data Start."
+          )
 
-          for attempt in 1 2 3
-          do
-            if git push origin main; then
-              echo "Push successful."
-              exit 0
-            fi
+      # Extract ONLY the content between the real markers.
+      data = source[
+          start_match.end():end_match.start()
+      ].strip()
 
-            echo "Push failed on attempt $attempt."
-            echo "Fetching latest main and retrying..."
+      # Convert HTML tags to line breaks if necessary.
+      data = re.sub(
+          r"<[^>]+>",
+          "\n",
+          data
+      )
 
-            git fetch origin main
-            git rebase -X theirs origin/main
-          done
+      # Decode HTML entities such as &nbsp;
+      data = html_module.unescape(data)
 
-          echo "ERROR: Push failed after 3 attempts."
-          exit 1
+      # Normalize excessive blank lines while preserving rows.
+      lines = data.splitlines()
+
+      cleaned_lines = []
+
+      for line in lines:
+          line = line.strip()
+
+          if line:
+              cleaned_lines.append(line)
+          elif cleaned_lines and cleaned_lines[-1] != "":
+              cleaned_lines.append("")
+
+      data = "\n".join(cleaned_lines).strip()
+
+      # Safety check.
+      records = [
+          line
+          for line in data.splitlines()
+          if ";" in line
+      ]
+
+      if not records:
+          raise SystemExit(
+              "ERROR: No licence records found. "
+              "Existing output will NOT be replaced."
+          )
+
+      output = (
+          "<!DOCTYPE html>\n"
+          "<html>\n"
+          "<head>\n"
+          "<meta charset=\"UTF-8\">\n"
+          "<title>The Forex Fund Manager</title>\n"
+          "</head>\n"
+          "<body>\n"
+          "<pre>\n"
+          + data +
+          "\n</pre>\n"
+          "</body>\n"
+          "</html>\n"
+      )
+
+      Path("theforexfundmanager.html").write_text(
+          output,
+          encoding="utf-8"
+      )
+
+      print("Output file created successfully.")
+      print("Licence records:", len(records))
+      print("Output data characters:", len(data))
+      print("First 1000 characters:")
+      print(data[:1000])
+
+      PY

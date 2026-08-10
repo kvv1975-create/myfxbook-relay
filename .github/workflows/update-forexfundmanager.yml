@@ -13,10 +13,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Download test.html
         run: |
@@ -35,16 +34,12 @@ jobs:
           echo "File size:"
           wc -c source.html
 
-          echo "First 500 characters received:"
-          head -c 500 source.html
-          echo
-          echo "----------------------------------------"
-
-      - name: Check source data
+      - name: Extract Data Start to Data End
         run: |
           python3 <<'PY'
           from pathlib import Path
           import re
+          from html import unescape
 
           html = Path("source.html").read_text(
               encoding="utf-8",
@@ -53,141 +48,120 @@ jobs:
 
           print("Total characters received:", len(html))
 
-          # Find ONLY standalone Data Start and Data End lines.
-          start_match = re.search(
-              r'(?im)^[ \t]*Data Start[ \t]*$',
-              html
+          # ---------------------------------------------------------
+          # Convert HTML into readable text.
+          # This removes HTML tags while preserving line boundaries.
+          # ---------------------------------------------------------
+
+          text = re.sub(
+              r"<(br|/p|/div|/li|/tr|/h[1-6])[^>]*>",
+              "\n",
+              html,
+              flags=re.IGNORECASE
           )
 
-          end_match = re.search(
-              r'(?im)^[ \t]*Data End[ \t]*$',
-              html
+          text = re.sub(
+              r"<[^>]+>",
+              " ",
+              text
           )
 
-          print("Standalone Data Start found:", bool(start_match))
-          print("Standalone Data End found:", bool(end_match))
+          text = unescape(text)
+
+          # Normalize non-breaking spaces
+          text = text.replace("\xa0", " ")
+
+          # Normalize line endings
+          text = text.replace("\r\n", "\n")
+          text = text.replace("\r", "\n")
+
+          # Remove excessive spaces but preserve lines
+          lines = []
+
+          for line in text.split("\n"):
+              line = re.sub(r"[ \t]+", " ", line).strip()
+              lines.append(line)
+
+          text = "\n".join(lines)
+
+          # ---------------------------------------------------------
+          # IMPORTANT:
+          # Find Data Start / Data End as STANDALONE lines.
+          #
+          # This prevents the workflow from accidentally selecting:
+          #
+          # "GitHub checks it every ~30 minutes -> extracts between
+          # Data Start and Data End..."
+          #
+          # Instead it searches for the actual marker line.
+          # ---------------------------------------------------------
+
+          start_pattern = re.compile(
+              r"(?im)^[ \t]*Data[ \t]+Start[ \t]*$"
+          )
+
+          end_pattern = re.compile(
+              r"(?im)^[ \t]*Data[ \t]+End[ \t]*$"
+          )
+
+          start_match = start_pattern.search(text)
 
           if not start_match:
-              raise SystemExit(
-                  "ERROR: Standalone Data Start marker was NOT found. "
-                  "Existing output will NOT be changed."
-              )
+              print("ERROR: Standalone Data Start marker was NOT found.")
+              print("Existing output will NOT be changed.")
+              raise SystemExit(1)
+
+          end_match = end_pattern.search(
+              text,
+              start_match.end()
+          )
 
           if not end_match:
-              raise SystemExit(
-                  "ERROR: Standalone Data End marker was NOT found. "
-                  "Existing output will NOT be changed."
-              )
+              print("ERROR: Standalone Data End marker was NOT found.")
+              print("Existing output will NOT be changed.")
+              raise SystemExit(1)
 
-          if end_match.start() <= start_match.end():
-              raise SystemExit(
-                  "ERROR: Data End occurs before Data Start. "
-                  "Existing output will NOT be changed."
-              )
+          print("Correct Data Start marker found.")
+          print("Correct Data End marker found.")
 
-          data = html[start_match.end():end_match.start()].strip()
+          # ---------------------------------------------------------
+          # Extract ONLY the data between the real markers.
+          # ---------------------------------------------------------
 
-          print("Extracted data characters:", len(data))
-          print("First 1000 characters of extracted data:")
-          print(data[:1000])
-
-          # Require at least one licence record.
-          records = [
-              line.strip()
-              for line in data.splitlines()
-              if ";" in line
-          ]
-
-          if not records:
-              raise SystemExit(
-                  "ERROR: No semicolon-separated licence records found. "
-                  "Existing output will NOT be changed."
-              )
-
-          print("Licence records detected:", len(records))
-          print("Source data check PASSED.")
-
-          PY
-
-      - name: Extract data and create HTML
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-          import html as html_module
-
-          source = Path("source.html").read_text(
-              encoding="utf-8",
-              errors="ignore"
-          )
-
-          # Find ONLY standalone Data Start and Data End lines.
-          start_match = re.search(
-              r'(?im)^[ \t]*Data Start[ \t]*$',
-              source
-          )
-
-          end_match = re.search(
-              r'(?im)^[ \t]*Data End[ \t]*$',
-              source
-          )
-
-          if not start_match:
-              raise SystemExit(
-                  "ERROR: Standalone Data Start marker not found."
-              )
-
-          if not end_match:
-              raise SystemExit(
-                  "ERROR: Standalone Data End marker not found."
-              )
-
-          if end_match.start() <= start_match.end():
-              raise SystemExit(
-                  "ERROR: Data End occurs before Data Start."
-              )
-
-          # Extract ONLY content between the real markers.
-          data = source[
-              start_match.end():end_match.start()
+          data = text[
+              start_match.end():
+              end_match.start()
           ].strip()
 
-          # Convert HTML tags to line breaks if required.
-          data = re.sub(
-              r"<[^>]+>",
-              "\n",
-              data
-          )
+          print("")
+          print("Extracted data characters:", len(data))
+          print("")
+          print("========== EXTRACTED DATA ==========")
+          print(data)
+          print("========== END EXTRACTED DATA ==========")
+          print("")
 
-          # Decode HTML entities such as &nbsp;
-          data = html_module.unescape(data)
-
-          # Clean excessive blank lines.
-          lines = data.splitlines()
-          cleaned_lines = []
-
-          for line in lines:
-              line = line.strip()
-
-              if line:
-                  cleaned_lines.append(line)
-              elif cleaned_lines and cleaned_lines[-1] != "":
-                  cleaned_lines.append("")
-
-          data = "\n".join(cleaned_lines).strip()
-
+          # ---------------------------------------------------------
           # Safety check.
-          records = [
-              line
-              for line in data.splitlines()
-              if ";" in line
-          ]
+          #
+          # We don't require semicolons anymore because you may add
+          # normal text such as:
+          #
+          # Hello
+          # Test
+          # New customer
+          #
+          # Only require that the extracted area is not empty.
+          # ---------------------------------------------------------
 
-          if not records:
-              raise SystemExit(
-                  "ERROR: No licence records found. "
-                  "Existing output will NOT be replaced."
-              )
+          if not data:
+              print("ERROR: Extracted data is empty.")
+              print("Existing output will NOT be changed.")
+              raise SystemExit(1)
+
+          # ---------------------------------------------------------
+          # Create the GitHub HTML file.
+          # ---------------------------------------------------------
 
           output = (
               "<!DOCTYPE html>\n"
@@ -210,11 +184,7 @@ jobs:
           )
 
           print("Output file created successfully.")
-          print("Licence records:", len(records))
-          print("Output data characters:", len(data))
-          print("First 1000 characters:")
-          print(data[:1000])
-
+          print("Output size:", len(output), "characters")
           PY
 
       - name: Commit changes
@@ -229,7 +199,8 @@ jobs:
           else
             git commit -m "Update ForexFundManager data"
 
-            # Bring any newer GitHub changes into the runner before pushing.
+            # Get any changes that may have been pushed to the
+            # repository after this workflow started.
             git pull --rebase origin main
 
             git push origin main

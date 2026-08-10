@@ -35,11 +35,6 @@ jobs:
           echo "File size:"
           wc -c source.html
 
-          echo "First 500 characters received:"
-          head -c 500 source.html
-          echo
-          echo "----------------------------------------"
-
       - name: Check source data
         run: |
           python3 <<'PY'
@@ -52,39 +47,77 @@ jobs:
 
           print("Total characters received:", len(html))
 
-          print("Data Start found:", "Data Start" in html)
-          print("Data End found:", "Data End" in html)
+          start_positions = []
+          pos = 0
 
-          if "Data Start" not in html:
+          while True:
+              pos = html.find("Data Start", pos)
+
+              if pos == -1:
+                  break
+
+              start_positions.append(pos)
+              pos += len("Data Start")
+
+          end_positions = []
+          pos = 0
+
+          while True:
+              pos = html.find("Data End", pos)
+
+              if pos == -1:
+                  break
+
+              end_positions.append(pos)
+              pos += len("Data End")
+
+          print("Data Start occurrences:", len(start_positions))
+          print("Data End occurrences:", len(end_positions))
+
+          if not start_positions:
               raise SystemExit(
                   "ERROR: Data Start was NOT found. "
-                  "GitHub will NOT modify the existing output file."
-              )
-
-          if "Data End" not in html:
-              raise SystemExit(
-                  "ERROR: Data End was NOT found. "
-                  "GitHub will NOT modify the existing output file."
-              )
-
-          print("Both markers found successfully.")
-
-          start = html.find("Data Start")
-          end = html.find("Data End", start)
-
-          data = html[start + len("Data Start"):end].strip()
-
-          print("Extracted data characters:", len(data))
-          print("First 500 characters of extracted data:")
-          print(data[:500])
-
-          if ";" not in data:
-              raise SystemExit(
-                  "ERROR: Extracted data does not contain semicolon records. "
                   "Existing output will NOT be changed."
               )
 
-          print("Semicolon-separated records detected.")
+          if not end_positions:
+              raise SystemExit(
+                  "ERROR: Data End was NOT found. "
+                  "Existing output will NOT be changed."
+              )
+
+          found = False
+
+          for start in start_positions:
+              for end in end_positions:
+
+                  if end <= start:
+                      continue
+
+                  data = html[
+                      start + len("Data Start"):end
+                  ].strip()
+
+                  if ";" in data:
+                      print("Valid data block found.")
+                      print("Extracted data characters:", len(data))
+                      print("First 500 characters:")
+                      print(data[:500])
+
+                      found = True
+                      break
+
+              if found:
+                  break
+
+          if not found:
+              raise SystemExit(
+                  "ERROR: No Data Start/Data End block containing "
+                  "semicolon-separated records was found. "
+                  "Existing output will NOT be changed."
+              )
+
+          print("Source data validation successful.")
 
           PY
 
@@ -95,45 +128,83 @@ jobs:
           import re
           import html as html_module
 
-          html = Path("source.html").read_text(
+          source = Path("source.html").read_text(
               encoding="utf-8",
               errors="ignore"
           )
 
-          start_marker = "Data Start"
-          end_marker = "Data End"
+          start_positions = []
+          pos = 0
 
-          start = html.find(start_marker)
+          while True:
+              pos = source.find("Data Start", pos)
 
-          if start == -1:
-              raise SystemExit("Data Start marker not found")
+              if pos == -1:
+                  break
 
-          start += len(start_marker)
+              start_positions.append(pos)
+              pos += len("Data Start")
 
-          end = html.find(end_marker, start)
+          end_positions = []
+          pos = 0
 
-          if end == -1:
-              raise SystemExit("Data End marker not found")
+          while True:
+              pos = source.find("Data End", pos)
 
-          data = html[start:end].strip()
+              if pos == -1:
+                  break
 
-          # Convert HTML tags to line breaks.
+              end_positions.append(pos)
+              pos += len("Data End")
+
+          data = None
+
+          for start in start_positions:
+              for end in end_positions:
+
+                  if end <= start:
+                      continue
+
+                  candidate = source[
+                      start + len("Data Start"):end
+                  ].strip()
+
+                  if ";" in candidate:
+                      data = candidate
+                      break
+
+              if data is not None:
+                  break
+
+          if data is None:
+              raise SystemExit(
+                  "ERROR: Valid Data Start/Data End block not found."
+              )
+
+          # Convert HTML tags into line breaks.
           data = re.sub(r"<[^>]+>", "\n", data)
 
           # Decode HTML entities such as &nbsp;.
           data = html_module.unescape(data)
 
-          # Remove zero-width / invisible characters that may
-          # occasionally come from the website editor.
+          # Remove invisible characters.
           data = data.replace("\u200b", "")
           data = data.replace("\ufeff", "")
+          data = data.replace("\u00a0", " ")
 
           data = data.strip()
 
+          # Final safety check.
           if ";" not in data:
               raise SystemExit(
-                  "Safety check failed: no semicolon-separated records found."
+                  "SAFETY ERROR: Extracted data contains no "
+                  "semicolon-separated records."
               )
+
+          print("Valid licence data extracted.")
+          print("Data characters:", len(data))
+          print("First 1000 characters:")
+          print(data[:1000])
 
           output = (
               "<!DOCTYPE html>\n"
@@ -156,7 +227,7 @@ jobs:
           )
 
           print("Output file created successfully.")
-          print("Output data characters:", len(data))
+
           PY
 
       - name: Commit changes

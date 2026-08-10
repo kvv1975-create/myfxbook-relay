@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -33,57 +34,141 @@ jobs:
           echo "File size:"
           wc -c source.html
 
-          echo "First 500 characters received:"
-          head -c 500 source.html
-          echo
           echo "----------------------------------------"
 
       - name: Check source data
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
+          import html as html_module
 
-          html = Path("source.html").read_text(
+          source = Path("source.html").read_text(
               encoding="utf-8",
               errors="ignore"
           )
 
-          print("Total characters received:", len(html))
+          print("Total characters received:", len(source))
 
-          print("Data Start found:", "Data Start" in html)
-          print("Data End found:", "Data End" in html)
+          start_marker = "Data Start"
+          end_marker = "Data End"
 
-          if "Data Start" not in html:
+          print("Data Start found:", start_marker in source)
+          print("Data End found:", end_marker in source)
+
+          if start_marker not in source:
               raise SystemExit(
-                  "ERROR: Data Start was NOT found. "
-                  "GitHub will NOT modify the existing output file."
+                  "ERROR: Data Start was NOT found."
               )
 
-          if "Data End" not in html:
+          if end_marker not in source:
               raise SystemExit(
-                  "ERROR: Data End was NOT found. "
-                  "GitHub will NOT modify the existing output file."
+                  "ERROR: Data End was NOT found."
               )
 
-          print("Both markers found successfully.")
-
-          start = html.find("Data Start")
-          end = html.find("Data End", start)
-
-          data = html[start + len("Data Start"):end].strip()
-
-          print("Extracted data characters:", len(data))
-          print("First 500 characters of extracted data:")
-          print(data[:500])
-
-          if ";" not in data:
-              raise SystemExit(
-                  "ERROR: Extracted data does not contain semicolon records. "
-                  "Existing output will NOT be changed."
+          def visible_text(value):
+              # Convert common HTML line-breaking elements to new lines.
+              value = re.sub(
+                  r"<\s*(br|/p|/div|/li|/tr|/h[1-6])[^>]*>",
+                  "\n",
+                  value,
+                  flags=re.I
               )
 
-          print("Semicolon-separated records detected.")
+              # Remove remaining HTML tags.
+              value = re.sub(
+                  r"<[^>]+>",
+                  "",
+                  value
+              )
 
+              # Decode HTML entities.
+              value = html_module.unescape(value)
+
+              return value
+
+          # Find EVERY possible Data Start -> Data End pair.
+          candidates = []
+
+          search_position = 0
+
+          while True:
+
+              start = source.find(start_marker, search_position)
+
+              if start == -1:
+                  break
+
+              end = source.find(
+                  end_marker,
+                  start + len(start_marker)
+              )
+
+              if end != -1:
+
+                  raw_data = source[
+                      start + len(start_marker):end
+                  ]
+
+                  text_data = visible_text(raw_data).strip()
+
+                  semicolon_count = text_data.count(";")
+
+                  candidates.append(
+                      (
+                          semicolon_count,
+                          len(text_data),
+                          text_data
+                      )
+                  )
+
+              search_position = start + len(start_marker)
+
+          print("Possible Data Start/Data End sections found:",
+                len(candidates))
+
+          if not candidates:
+              raise SystemExit(
+                  "ERROR: No Data Start/Data End section found."
+              )
+
+          # Choose the section containing the most semicolon records.
+          candidates.sort(
+              key=lambda item: (item[0], item[1]),
+              reverse=True
+          )
+
+          semicolon_count, data_length, data = candidates[0]
+
+          print(
+              "Selected section:",
+              "semicolon count =", semicolon_count,
+              "characters =", data_length
+          )
+
+          print("----------------------------------------")
+          print("First 1000 characters of selected data:")
+          print(data[:1000])
+          print("----------------------------------------")
+
+          # Safety check.
+          if semicolon_count < 5:
+              raise SystemExit(
+                  "ERROR: Selected data does not contain enough "
+                  "semicolon-separated records."
+              )
+
+          # Confirm that this really looks like our licence data.
+          if (
+              "INDIAN SNIPER" not in data
+              and "FOREX" not in data
+          ):
+              raise SystemExit(
+                  "ERROR: Selected section does not contain "
+                  "expected ForexFundManager data."
+              )
+
+          print("Source data validation successful.")
           PY
 
       - name: Extract data and create HTML
@@ -91,8 +176,9 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
           import re
+          import html as html_module
 
-          html = Path("source.html").read_text(
+          source = Path("source.html").read_text(
               encoding="utf-8",
               errors="ignore"
           )
@@ -100,33 +186,107 @@ jobs:
           start_marker = "Data Start"
           end_marker = "Data End"
 
-          start = html.find(start_marker)
+          def visible_text(value):
 
-          if start == -1:
-              raise SystemExit("Data Start marker not found")
-
-          start += len(start_marker)
-
-          end = html.find(end_marker, start)
-
-          if end == -1:
-              raise SystemExit("Data End marker not found")
-
-          data = html[start:end].strip()
-
-          # Convert HTML to visible text only if HTML tags exist.
-          data = re.sub(r"<[^>]+>", "\n", data)
-
-          # Decode common HTML spacing
-          data = data.replace("&nbsp;", " ")
-
-          # Preserve the original semicolon-separated records.
-          data = data.strip()
-
-          if ";" not in data:
-              raise SystemExit(
-                  "Safety check failed: no semicolon-separated records found."
+              # Preserve line breaks from the original page.
+              value = re.sub(
+                  r"<\s*(br|/p|/div|/li|/tr|/h[1-6])[^>]*>",
+                  "\n",
+                  value,
+                  flags=re.I
               )
+
+              # Remove remaining HTML tags.
+              value = re.sub(
+                  r"<[^>]+>",
+                  "",
+                  value
+              )
+
+              # Decode HTML entities.
+              value = html_module.unescape(value)
+
+              return value
+
+          candidates = []
+
+          search_position = 0
+
+          while True:
+
+              start = source.find(
+                  start_marker,
+                  search_position
+              )
+
+              if start == -1:
+                  break
+
+              end = source.find(
+                  end_marker,
+                  start + len(start_marker)
+              )
+
+              if end != -1:
+
+                  raw_data = source[
+                      start + len(start_marker):end
+                  ]
+
+                  text_data = visible_text(
+                      raw_data
+                  ).strip()
+
+                  semicolon_count = text_data.count(";")
+
+                  candidates.append(
+                      (
+                          semicolon_count,
+                          len(text_data),
+                          text_data
+                      )
+                  )
+
+              search_position = start + len(start_marker)
+
+          if not candidates:
+              raise SystemExit(
+                  "ERROR: Data section not found."
+              )
+
+          # Select the actual licence-data section.
+          candidates.sort(
+              key=lambda item: (item[0], item[1]),
+              reverse=True
+          )
+
+          semicolon_count, data_length, data = candidates[0]
+
+          print(
+              "Selected data section:",
+              semicolon_count,
+              "semicolons /",
+              data_length,
+              "characters"
+          )
+
+          # Safety checks before replacing the live output.
+          if semicolon_count < 5:
+              raise SystemExit(
+                  "SAFETY STOP: Not enough semicolon records."
+              )
+
+          if (
+              "INDIAN SNIPER" not in data
+              and "FOREX" not in data
+          ):
+              raise SystemExit(
+                  "SAFETY STOP: Expected ForexFundManager "
+                  "sections not found."
+              )
+
+          # Keep the actual data as text.
+          data = data.strip()
 
           output = (
               "<!DOCTYPE html>\n"
@@ -143,13 +303,19 @@ jobs:
               "</html>\n"
           )
 
-          Path("theforexfundmanager.html").write_text(
+          Path(
+              "theforexfundmanager.html"
+          ).write_text(
               output,
               encoding="utf-8"
           )
 
+          print("----------------------------------------")
           print("Output file created successfully.")
           print("Output data characters:", len(data))
+          print("Semicolon count:", semicolon_count)
+          print("----------------------------------------")
+          print(data[:1000])
           PY
 
       - name: Commit changes

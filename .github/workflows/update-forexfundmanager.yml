@@ -1,1 +1,83 @@
+name: Update ForexFundManager
 
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download test.html
+        run: |
+          curl -L --fail --silent --show-error \
+            "http://www.theforexfundmanager.com/test.html" \
+            -o source.html
+
+      - name: Extract data
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path("source.html").read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
+
+          # Get visible text from the HTML
+          text = re.sub(r"<[^>]+>", "\n", html)
+          text = text.replace("&nbsp;", " ")
+
+          # Locate the C Drive Reading section
+          start = text.find("C Drive Reading")
+          end = text.find("Adobe Acrobat")
+
+          if start == -1:
+              raise SystemExit("C Drive Reading section not found")
+
+          if end == -1:
+              end = len(text)
+
+          data = text[start:end].strip()
+
+          # Preserve the data inside our HTML page
+          output = """<!DOCTYPE html>
+          <html>
+          <head>
+          <meta charset="UTF-8">
+          <title>The Forex Fund Manager</title>
+          </head>
+          <body>
+          <pre>
+          """ + data + """
+          </pre>
+          </body>
+          </html>
+          """
+
+          Path("theforexfundmanager.html").write_text(
+              output,
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add theforexfundmanager.html
+
+          git diff --cached --quiet || \
+            git commit -m "Update ForexFundManager data"
+
+          git push

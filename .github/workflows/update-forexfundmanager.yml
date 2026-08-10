@@ -18,11 +18,75 @@ jobs:
 
       - name: Download test.html
         run: |
-          curl -L --fail --silent --show-error \
+          echo "Downloading source page..."
+
+          curl -L \
+            --fail \
+            --silent \
+            --show-error \
+            --user-agent "Mozilla/5.0" \
             "http://www.theforexfundmanager.com/test.html" \
             -o source.html
 
-      - name: Extract data
+          echo "Downloaded successfully."
+
+          echo "File size:"
+          wc -c source.html
+
+          echo "First 500 characters received:"
+          head -c 500 source.html
+          echo
+          echo "----------------------------------------"
+
+      - name: Check source data
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          html = Path("source.html").read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
+
+          print("Total characters received:", len(html))
+
+          print("Data Start found:", "Data Start" in html)
+          print("Data End found:", "Data End" in html)
+
+          if "Data Start" not in html:
+              raise SystemExit(
+                  "ERROR: Data Start was NOT found. "
+                  "GitHub will NOT modify the existing output file."
+              )
+
+          if "Data End" not in html:
+              raise SystemExit(
+                  "ERROR: Data End was NOT found. "
+                  "GitHub will NOT modify the existing output file."
+              )
+
+          print("Both markers found successfully.")
+
+          start = html.find("Data Start")
+          end = html.find("Data End", start)
+
+          data = html[start + len("Data Start"):end].strip()
+
+          print("Extracted data characters:", len(data))
+          print("First 500 characters of extracted data:")
+          print(data[:500])
+
+          if ";" not in data:
+              raise SystemExit(
+                  "ERROR: Extracted data does not contain semicolon records. "
+                  "Existing output will NOT be changed."
+              )
+
+          print("Semicolon-separated records detected.")
+
+          PY
+
+      - name: Extract data and create HTML
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -33,32 +97,38 @@ jobs:
               errors="ignore"
           )
 
-          # Convert HTML to text
-          text = re.sub(r"<[^>]+>", "\n", html)
-          text = text.replace("&nbsp;", " ")
-          text = text.replace("\r", "")
-
-          # Find data markers
           start_marker = "Data Start"
           end_marker = "Data End"
 
-          start = text.find(start_marker)
+          start = html.find(start_marker)
 
           if start == -1:
               raise SystemExit("Data Start marker not found")
 
           start += len(start_marker)
 
-          end = text.find(end_marker, start)
+          end = html.find(end_marker, start)
 
           if end == -1:
               raise SystemExit("Data End marker not found")
 
-          # Extract ONLY data between markers
-          data = text[start:end].strip()
+          data = html[start:end].strip()
 
-          # Create HTML safely
-          html_output = (
+          # Convert HTML to visible text only if HTML tags exist.
+          data = re.sub(r"<[^>]+>", "\n", data)
+
+          # Decode common HTML spacing
+          data = data.replace("&nbsp;", " ")
+
+          # Preserve the original semicolon-separated records.
+          data = data.strip()
+
+          if ";" not in data:
+              raise SystemExit(
+                  "Safety check failed: no semicolon-separated records found."
+              )
+
+          output = (
               "<!DOCTYPE html>\n"
               "<html>\n"
               "<head>\n"
@@ -74,12 +144,12 @@ jobs:
           )
 
           Path("theforexfundmanager.html").write_text(
-              html_output,
+              output,
               encoding="utf-8"
           )
 
-          print("Data successfully extracted.")
-          print("Characters copied:", len(data))
+          print("Output file created successfully.")
+          print("Output data characters:", len(data))
           PY
 
       - name: Commit changes

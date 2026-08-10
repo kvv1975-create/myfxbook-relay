@@ -24,7 +24,7 @@ jobs:
 
       - name: Extract data
         run: |
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
           import re
 
@@ -38,7 +38,7 @@ jobs:
           text = text.replace("&nbsp;", " ")
           text = text.replace("\r", "")
 
-          # Find the exact data boundaries
+          # Find data markers
           start_marker = "Data Start"
           end_marker = "Data End"
 
@@ -47,35 +47,39 @@ jobs:
           if start == -1:
               raise SystemExit("Data Start marker not found")
 
-          start = start + len(start_marker)
+          start += len(start_marker)
 
           end = text.find(end_marker, start)
 
           if end == -1:
               raise SystemExit("Data End marker not found")
 
-          # Copy ONLY the content between the two markers
+          # Extract ONLY data between markers
           data = text[start:end].strip()
 
-          # Create the GitHub HTML page
-          output = """<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>The Forex Fund Manager</title>
-</head>
-<body>
-<pre>
-""" + data + """
-</pre>
-</body>
-</html>
-"""
+          # Create HTML safely
+          html_output = (
+              "<!DOCTYPE html>\n"
+              "<html>\n"
+              "<head>\n"
+              "<meta charset=\"UTF-8\">\n"
+              "<title>The Forex Fund Manager</title>\n"
+              "</head>\n"
+              "<body>\n"
+              "<pre>\n"
+              + data +
+              "\n</pre>\n"
+              "</body>\n"
+              "</html>\n"
+          )
 
           Path("theforexfundmanager.html").write_text(
-              output,
+              html_output,
               encoding="utf-8"
           )
+
+          print("Data successfully extracted.")
+          print("Characters copied:", len(data))
           PY
 
       - name: Commit changes

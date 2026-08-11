@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: forexfundmanager-update
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -48,11 +52,6 @@ jobs:
 
           print("Total characters received:", len(html))
 
-          # ---------------------------------------------------------
-          # Convert HTML into readable text.
-          # This removes HTML tags while preserving line boundaries.
-          # ---------------------------------------------------------
-
           text = re.sub(
               r"<(br|/p|/div|/li|/tr|/h[1-6])[^>]*>",
               "\n",
@@ -67,34 +66,16 @@ jobs:
           )
 
           text = unescape(text)
-
-          # Normalize non-breaking spaces
           text = text.replace("\xa0", " ")
-
-          # Normalize line endings
           text = text.replace("\r\n", "\n")
           text = text.replace("\r", "\n")
 
-          # Remove excessive spaces but preserve lines
           lines = []
-
           for line in text.split("\n"):
               line = re.sub(r"[ \t]+", " ", line).strip()
               lines.append(line)
 
           text = "\n".join(lines)
-
-          # ---------------------------------------------------------
-          # IMPORTANT:
-          # Find Data Start / Data End as STANDALONE lines.
-          #
-          # This prevents the workflow from accidentally selecting:
-          #
-          # "GitHub checks it every ~30 minutes -> extracts between
-          # Data Start and Data End..."
-          #
-          # Instead it searches for the actual marker line.
-          # ---------------------------------------------------------
 
           start_pattern = re.compile(
               r"(?im)^[ \t]*Data[ \t]+Start[ \t]*$"
@@ -124,10 +105,6 @@ jobs:
           print("Correct Data Start marker found.")
           print("Correct Data End marker found.")
 
-          # ---------------------------------------------------------
-          # Extract ONLY the data between the real markers.
-          # ---------------------------------------------------------
-
           data = text[
               start_match.end():
               end_match.start()
@@ -141,27 +118,10 @@ jobs:
           print("========== END EXTRACTED DATA ==========")
           print("")
 
-          # ---------------------------------------------------------
-          # Safety check.
-          #
-          # We don't require semicolons anymore because you may add
-          # normal text such as:
-          #
-          # Hello
-          # Test
-          # New customer
-          #
-          # Only require that the extracted area is not empty.
-          # ---------------------------------------------------------
-
           if not data:
               print("ERROR: Extracted data is empty.")
               print("Existing output will NOT be changed.")
               raise SystemExit(1)
-
-          # ---------------------------------------------------------
-          # Create the GitHub HTML file.
-          # ---------------------------------------------------------
 
           output = (
               "<!DOCTYPE html>\n"
@@ -199,9 +159,10 @@ jobs:
           else
             git commit -m "Update ForexFundManager data"
 
-            # Get any changes that may have been pushed to the
-            # repository after this workflow started.
-            git pull --rebase origin main
+            # This file is fully bot-generated every run, so if the remote
+            # has a different version (e.g. from an overlapping run), our
+            # freshly-extracted data always wins - no manual merge needed.
+            git pull --rebase -X ours origin main
 
             git push origin main
           fi

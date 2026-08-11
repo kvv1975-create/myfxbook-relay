@@ -123,6 +123,40 @@ jobs:
               print("Existing output will NOT be changed.")
               raise SystemExit(1)
 
+          # ---------------------------------------------------------
+          # Detect whether the underlying data actually changed,
+          # independent of the timestamp (which always changes).
+          # We do this by hashing just the extracted data and
+          # comparing against the hash stored in the previous run's
+          # output file (hidden in an HTML comment).
+          # ---------------------------------------------------------
+          import hashlib
+          from datetime import datetime, timezone
+
+          new_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+          old_hash = None
+          existing_path = Path("theforexfundmanager.html")
+          if existing_path.exists():
+              old_content = existing_path.read_text(encoding="utf-8", errors="ignore")
+              m = re.search(r"<!--\s*DATA_HASH:([0-9a-f]{64})\s*-->", old_content)
+              if m:
+                  old_hash = m.group(1)
+
+          if old_hash is None:
+              status = "First run - no previous data to compare"
+          elif old_hash == new_hash:
+              status = "No changes - data is the same as last check"
+          else:
+              status = "New data found - page updated"
+
+          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          print("")
+          print("Status:", status)
+          print("Timestamp:", timestamp)
+          print("")
+
           output = (
               "<!DOCTYPE html>\n"
               "<html>\n"
@@ -131,6 +165,12 @@ jobs:
               "<title>The Forex Fund Manager</title>\n"
               "</head>\n"
               "<body>\n"
+              f"<!-- DATA_HASH:{new_hash} -->\n"
+              "<div style=\"font-family:monospace;margin-bottom:10px;\">\n"
+              f"<b>Last update attempt:</b> {timestamp}<br>\n"
+              f"<b>Status:</b> {status}\n"
+              "</div>\n"
+              "<hr>\n"
               "<pre>\n"
               + data +
               "\n</pre>\n"
@@ -154,15 +194,16 @@ jobs:
 
           git add theforexfundmanager.html
 
-          if git diff --cached --quiet; then
-            echo "No changes detected."
-          else
-            git commit -m "Update ForexFundManager data"
+          # The file now always contains a fresh timestamp, so it will
+          # always differ from the last commit - we commit every run
+          # to keep the "Last update attempt" timestamp current, and
+          # rely on the Status line (not git history) to show whether
+          # the underlying scraped data actually changed.
+          git commit -m "Update ForexFundManager data" || echo "Nothing to commit"
 
-            # This file is fully bot-generated every run, so if the remote
-            # has a different version (e.g. from an overlapping run), our
-            # freshly-extracted data always wins - no manual merge needed.
-            git pull --rebase -X ours origin main
+          # This file is fully bot-generated every run, so if the remote
+          # has a different version (e.g. from an overlapping run), our
+          # freshly-extracted data always wins - no manual merge needed.
+          git pull --rebase -X ours origin main
 
-            git push origin main
-          fi
+          git push origin main
